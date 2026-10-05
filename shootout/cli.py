@@ -13,6 +13,7 @@ from pathlib import Path
 from shootout.catalog import (
     APPS,
     EXTRA_ROUTES,
+    OPTIONAL_APPS,
     ROUTES,
     cpu_count,
     default_cpu_sets,
@@ -120,7 +121,7 @@ def _list(root: Path) -> int:
     print(f"loadgen    {binary}  {'ready' if binary.is_file() else 'not built'}")
     print(f"env        {reference_env(root)}")
     print()
-    for checkout in (inspect(root, app) for app in APPS):
+    for checkout in (inspect(root, app) for app in (*APPS, *OPTIONAL_APPS)):
         state = checkout.revision[:12] if checkout.present else "missing"
         dirty = " dirty" if checkout.dirty else ""
         reference = f"  reference {checkout.reference_revision[:12]}" if checkout.reference_revision else ""

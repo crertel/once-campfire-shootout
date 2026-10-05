@@ -226,4 +226,4 @@ def _metadata_lines(metadata: dict) -> list[str]:
 
 def _title(name: str) -> str:
     return {"rails": "Rails", "django": "Django", "laravel": "Laravel", "express": "Express",
-            "elixir": "Elixir", "go": "Go", "rust": "Rust"}.get(name, name)
+            "elixir": "Elixir", "go": "Go", "rust": "Rust", "dotnet": "ASP.NET"}.get(name, name)

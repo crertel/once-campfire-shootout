@@ -14,7 +14,7 @@ The ports live next to this directory, cloned from the Basecamp repositories:
 | Go | `../once-campfire-go` | [basecamp/once-campfire-go](https://github.com/basecamp/once-campfire-go) |
 | Rust | `../once-campfire-rust` | [basecamp/once-campfire-rust](https://github.com/basecamp/once-campfire-rust) |
 
-DHH has no separate Campfire repositories. These Basecamp `main` branches are the authoritative trees. The local ASP.NET port in `../once-campfire-dotnet` is not one of them, and its own bench hits Kestrel without the production proxy or gzip, so it is not a column in this table.
+DHH has no separate Campfire repositories. These Basecamp `main` branches are the authoritative trees. The local ASP.NET port in `../once-campfire-dotnet` is optional: `campfire-shootout build --apps dotnet` and `campfire-shootout bench --apps rails,dotnet` launch it with the same contract as Rails (Thruster on `HTTP_PORT`, the app on `TARGET_PORT`, mounts under `/rails/storage`). It is not in the default set. Its image opens `production.sqlite3` with the ASP.NET schema and leaves a Rails parity seed unchanged, so those rounds do not serve the seeded rooms.
 
 ## What a run measures
 

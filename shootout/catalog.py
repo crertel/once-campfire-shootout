@@ -34,6 +34,8 @@ class App:
     binds_redis: bool
     redis_sidecar: bool
     note: str
+    # Kept out of the default set. `parse_apps` still accepts the name.
+    optional: bool = False
 
 
 REDIS_IMAGE = "redis:7.2-alpine"
@@ -199,7 +201,34 @@ APPS: tuple[App, ...] = (
     ),
 )
 
-BY_NAME = {app.name: app for app in APPS}
+# Local ports that use the same Docker launch contract but are not part of the
+# default comparison. Select them by name: --apps dotnet
+OPTIONAL_APPS: tuple[App, ...] = (
+    App(
+        name="dotnet",
+        title="ASP.NET",
+        checkout="once-campfire-dotnet",
+        image="once-campfire-dotnet:shootout",
+        build=(
+            (
+                "docker", "build",
+                "--build-arg", "GIT_REVISION={rev}",
+                "--build-arg", "APP_VERSION=shootout",
+                "-t", "{image}",
+                ".",
+            ),
+        ),
+        run_user="",
+        worker_env=(),
+        port_offsets=(0, 1),
+        binds_redis=False,
+        redis_sidecar=False,
+        optional=True,
+        note="Kestrel behind the Rails Thruster binary. Same HTTP_PORT, TARGET_PORT, and /rails/storage mounts. No Redis. The server opens production.sqlite3 with its own schema, so the Rails parity seed is left unchanged and is not served.",
+    ),
+)
+
+BY_NAME = {app.name: app for app in (*APPS, *OPTIONAL_APPS)}
 
 ROUTES = (
     "room_show",
@@ -229,7 +258,7 @@ def parse_apps(text: str) -> tuple[App, ...]:
     names = [part.strip() for part in text.split(",") if part.strip()]
     unknown = [name for name in names if name not in BY_NAME]
     if unknown or not names or len(names) != len(set(names)):
-        known = ", ".join(app.name for app in APPS)
+        known = ", ".join(app.name for app in (*APPS, *OPTIONAL_APPS))
         raise ValueError(f"apps must be a unique subset of {known}")
     return tuple(BY_NAME[name] for name in names)
 

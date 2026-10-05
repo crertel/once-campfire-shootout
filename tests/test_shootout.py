@@ -39,8 +39,17 @@ def test_default_cpus_use_the_published_sets_on_a_16_thread_machine():
 
 def test_parse_apps_rejects_unknown_and_duplicate_names():
     assert [app.name for app in parse_apps("rust,go")] == ["rust", "go"]
+    assert [app.name for app in parse_apps("all")] == [
+        "rails", "django", "laravel", "express", "elixir", "go", "rust",
+    ]
+    assert [app.name for app in parse_apps("dotnet")] == ["dotnet"]
+    assert [app.name for app in parse_apps("rails,dotnet")] == ["rails", "dotnet"]
+    dotnet = parse_apps("dotnet")[0]
+    assert dotnet.image == "once-campfire-dotnet:shootout"
+    assert dotnet.port_offsets == (0, 1)
+    assert required_ports(dotnet, 25130) == (25130, 25131)
     with pytest.raises(ValueError):
-        parse_apps("dotnet")
+        parse_apps("nope")
     with pytest.raises(ValueError):
         parse_apps("rails,rails")
 
