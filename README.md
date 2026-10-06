@@ -13,15 +13,16 @@ The ports live next to this directory, cloned from the Basecamp repositories:
 | Elixir | `../once-campfire-elixir` | [basecamp/once-campfire-elixir](https://github.com/basecamp/once-campfire-elixir) |
 | Go | `../once-campfire-go` | [basecamp/once-campfire-go](https://github.com/basecamp/once-campfire-go) |
 | Rust | `../once-campfire-rust` | [basecamp/once-campfire-rust](https://github.com/basecamp/once-campfire-rust) |
+| ASP.NET | `../once-campfire-dotnet` | local checkout |
 
-DHH has no separate Campfire repositories. These Basecamp `main` branches are the authoritative trees. The local ASP.NET port in `../once-campfire-dotnet` is optional: `campfire-shootout build --apps dotnet` and `campfire-shootout bench --apps rails,dotnet` launch it with the same contract as Rails (Thruster on `HTTP_PORT`, the app on `TARGET_PORT`, mounts under `/rails/storage`). It is not in the default set. Its image opens `production.sqlite3` with the ASP.NET schema and leaves a Rails parity seed unchanged, so those rounds do not serve the seeded rooms.
+DHH has no separate Campfire repositories. These Basecamp `main` branches are the authoritative trees. The local ASP.NET port is in the default set. It launches with the same contract as Rails (Thruster on `HTTP_PORT`, the app on `TARGET_PORT`, mounts under `/rails/storage`) and does not use Redis. A Rails parity database is left unchanged and is not served, so each ASP.NET round seeds `campfire.sqlite` inside its image: David, one Watercooler room, and 80 messages. Posts are measured in that room.
 
 ## What a run measures
 
 This follows the official production comparison, not the direct-to-Puma bench in the Rails tree:
 
 - Each app runs from its own Dockerfile, alone, on CPUs `8-11` when the machine has at least 16 CPUs. The load generator uses `12-15`.
-- The fixture is the Rust port's `parity` seed (`rooms.watercooler`, `messages.busy_060`, David signed in).
+- The fixture for the Basecamp ports is the Rust port's `parity` seed (`rooms.watercooler`, `messages.busy_060`, David signed in). ASP.NET seeds its own smaller database, described above.
 - The client is the Elixir port's `bench/loadgen`: keep-alive HTTP/1.1, gzip asked for by default, whole body read.
 - Workloads are the README rows: room page, messages page, sidebar, search, and posting a message.
 - Rounds are even and the app order flips each round. A cell is the median, with the ratio to Rails.
@@ -41,7 +42,7 @@ campfire-shootout seed          # Rust parity reference image, then parity/.seed
 campfire-shootout loadgen       # compiles bench/loadgen with the Nix Rust toolchain
 campfire-shootout build         # every production image; Rust, Go and Elixir take a long time
 campfire-shootout check
-campfire-shootout bench --apps rails,django,laravel,express,elixir,go,rust
+campfire-shootout bench --apps rails,django,laravel,express,elixir,go,rust,dotnet
 campfire-shootout report tmp/results/<stamp>
 ```
 
@@ -55,4 +56,4 @@ campfire-shootout bench --load-max 1.5    # wait until the one-minute load avera
 
 Results land in `tmp/results/<utc-stamp>/` (`report.md`, `summary.json`, per-round JSON, container logs when a round fails). That directory is gitignored.
 
-`check` is the readiness list: checkouts, seed, load generator, images, Docker, and free ports. Django with more than one worker also needs `redis:7.2-alpine`, which its build pulls. Laravel keeps the image's eight PHP-FPM workers and needs the HTTP port, that port plus 1000, and that port plus 2000. Rails and Elixir need host port 6379 for the Redis they start themselves.
+`check` is the readiness list: checkouts, seed, load generator, images, Docker, and free ports. On rootless Docker the harness runs containers as uid 0, because that uid is the host user and the port scripts' `--user $(id)` cannot write the bind mounts. Django with more than one worker also needs `redis:7.2-alpine`, which its build pulls. Laravel keeps the image's eight PHP-FPM workers and needs the HTTP port, that port plus 1000, and that port plus 2000. Rails and Elixir need host port 6379 for the Redis they start themselves.

@@ -23,6 +23,7 @@ from shootout.catalog import (
     worker_count,
 )
 from shootout.discover import find_root, inspect, reference_env, seed_dir
+from shootout.docker_shim import docker_is_rootless, install_rootless_shim
 from shootout.report import markdown, summarize
 from shootout.runner import (
     HarnessError,
@@ -66,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command in {"seed", "build", "check", "bench"}:
+            install_rootless_shim()
         root = find_root(args.root)
         if args.command == "list":
             return _list(root)
@@ -188,6 +191,8 @@ def _check(root: Path, args: argparse.Namespace) -> int:
         info = subprocess.run(["docker", "info"], check=False, capture_output=True)
         if info.returncode != 0:
             problems.append("docker info failed")
+        elif docker_is_rootless():
+            print("ok    docker (rootless; containers run as uid 0)")
         else:
             print("ok    docker")
     server, clients = _cpus(args)

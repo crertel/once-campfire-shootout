@@ -150,7 +150,7 @@ def markdown(summary: dict, metadata: dict | None = None) -> str:
     if summary["bodies"]:
         lines.append("## Response differences")
         lines.append("")
-        lines.append("Same route and seed. A different body or message window means the throughput columns are not serving identical HTML.")
+        lines.append("Same route. A different body or message window means the throughput columns are not serving identical HTML. ASP.NET is also a different fixture, noted above.")
         lines.append("")
         lines.append("| Workload | App | Decoded bytes | Rails bytes | Same body | Same messages |")
         lines.append("|---|---|---:|---:|---|---|")
@@ -218,9 +218,15 @@ def _metadata_lines(metadata: dict) -> list[str]:
         rendered = ", ".join(f"{name} `{rev[:12]}`" for name, rev in revisions.items())
         lines.append(f"Revisions: {rendered}.")
     lines.append(
-        "Each app runs alone, from its production image, on a fresh copy of the Rust port's parity seed. "
+        "Each app runs alone from its production image. "
+        "The Basecamp ports share a fresh copy of the Rust port's parity seed. "
         "Loopback measurements skip the NIC and TLS."
     )
+    if "dotnet" in revisions:
+        lines.append(
+            "ASP.NET seeds its own database inside the image (David, one Watercooler room, 80 messages) "
+            "and posts into that room. It leaves a Rails parity database unchanged, so it does not serve the shared fixture."
+        )
     return lines
 
 

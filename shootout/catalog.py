@@ -36,6 +36,9 @@ class App:
     note: str
     # Kept out of the default set. `parse_apps` still accepts the name.
     optional: bool = False
+    # "rails" copies the shared parity seed. "aspnet" asks the image to write
+    # its own database: this server leaves a Rails schema untouched.
+    fixture: str = "rails"
 
 
 REDIS_IMAGE = "redis:7.2-alpine"
@@ -199,11 +202,6 @@ APPS: tuple[App, ...] = (
         redis_sidecar=False,
         note="One process, its own HTTP listener. This measures the checkout's Dockerfile, not a previously published image id.",
     ),
-)
-
-# Local ports that use the same Docker launch contract but are not part of the
-# default comparison. Select them by name: --apps dotnet
-OPTIONAL_APPS: tuple[App, ...] = (
     App(
         name="dotnet",
         title="ASP.NET",
@@ -223,10 +221,13 @@ OPTIONAL_APPS: tuple[App, ...] = (
         port_offsets=(0, 1),
         binds_redis=False,
         redis_sidecar=False,
-        optional=True,
-        note="Kestrel behind the Rails Thruster binary. Same HTTP_PORT, TARGET_PORT, and /rails/storage mounts. No Redis. The server opens production.sqlite3 with its own schema, so the Rails parity seed is left unchanged and is not served.",
+        fixture="aspnet",
+        note="Local port. Kestrel behind the Rails Thruster binary, no Redis. Each round seeds campfire.sqlite inside the image (David, Watercooler, 80 messages) because a Rails database is left unchanged and is not served. Posts go to Watercooler.",
     ),
 )
+
+# Kept so a name can be held out of the default set later. Empty today.
+OPTIONAL_APPS: tuple[App, ...] = ()
 
 BY_NAME = {app.name: app for app in (*APPS, *OPTIONAL_APPS)}
 

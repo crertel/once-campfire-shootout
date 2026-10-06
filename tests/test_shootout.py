@@ -15,13 +15,17 @@ from shootout.catalog import (
 from shootout.cli import main
 from shootout.discover import find_root
 from shootout.report import format_ratio, markdown, median, summarize
-from shootout.runner import _fetch, _preflight_error, launch_env, parse_env_file
+from shootout.docker_shim import endpoint_is_rootless, rewrite_docker_args
+from shootout.runner import _fetch, _message_count, _preflight_error, launch_env, parse_env_file
 
 
-def test_blessed_ports_match_the_readme_order():
+def test_default_set_is_the_blessed_ports_plus_aspnet():
     assert [app.name for app in APPS] == [
-        "rails", "django", "laravel", "express", "elixir", "go", "rust",
+        "rails", "django", "laravel", "express", "elixir", "go", "rust", "dotnet",
     ]
+    dotnet = next(app for app in APPS if app.name == "dotnet")
+    assert dotnet.fixture == "aspnet"
+    assert all(app.fixture == "rails" for app in APPS if app.name != "dotnet")
 
 
 def test_worker_count_matches_the_elixir_driver():
@@ -40,7 +44,7 @@ def test_default_cpus_use_the_published_sets_on_a_16_thread_machine():
 def test_parse_apps_rejects_unknown_and_duplicate_names():
     assert [app.name for app in parse_apps("rust,go")] == ["rust", "go"]
     assert [app.name for app in parse_apps("all")] == [
-        "rails", "django", "laravel", "express", "elixir", "go", "rust",
+        "rails", "django", "laravel", "express", "elixir", "go", "rust", "dotnet",
     ]
     assert [app.name for app in parse_apps("dotnet")] == ["dotnet"]
     assert [app.name for app in parse_apps("rails,dotnet")] == ["rails", "dotnet"]
@@ -68,6 +72,8 @@ def test_launch_env_uses_three_workers_and_the_shared_secrets():
     assert django_env["REDIS_URL"] == "redis://127.0.0.1:25132/0"
     assert django_env["WEB_WORKERS"] == "3"
     assert launch_env(text, elixir, 25130, "8-11")["PORT"] == "25130"
+    dotnet = next(app for app in APPS if app.name == "dotnet")
+    assert launch_env(text, dotnet, 25130, "8-11")["CAMPFIRE_DB"] == "/rails/storage/db/campfire.sqlite"
     assert parse_env_file(text)["SECRET_KEY_BASE"] == "test"
 
 
@@ -118,6 +124,18 @@ def test_preflight_accepts_a_populated_room_and_rejects_an_empty_one():
     assert _preflight_error("room_show", 200, "hello", [], "text/html", 1, 5) == "response has no messages"
     assert _preflight_error("avatar", 200, "", None, "image/png", 1, 120) is None
     assert _preflight_error("up", 500, "no", None, "text/html", 1, 2) == "HTTP 500"
+    assert _preflight_error("sidebar", 200, 'shared_rooms data-room="7"', None, "text/html", 7, 30) is None
+    assert _preflight_error("sidebar", 200, 'data-sidebar-room="7"', None, "text/html", 7, 24) is None
+    assert _preflight_error("sidebar", 200, "shared_rooms", None, "text/html", 7, 12) == "sidebar is missing the seeded room"
+
+
+def test_message_count_reads_the_aspnet_messages_table(tmp_path):
+    database = tmp_path / "campfire.sqlite"
+    import sqlite3
+    with sqlite3.connect(database) as connection:
+        connection.execute('CREATE TABLE "Messages" ("Id" INTEGER, "RoomId" INTEGER)')
+        connection.execute('INSERT INTO "Messages" ("Id", "RoomId") VALUES (1, 7), (2, 8)')
+    assert _message_count(database, 7, "dotnet", "unused") == 1
 
 
 def test_fetch_reads_gzip_and_message_ids():
@@ -147,6 +165,20 @@ def test_fetch_reads_gzip_and_message_ids():
     assert fetched["message_ids"] == [9]
     assert fetched["decoded_bytes"] == len(body)
     assert fetched["wire_bytes"] == len(wire)
+
+
+def test_rootless_docker_runs_the_host_user_as_container_root():
+    assert endpoint_is_rootless("unix:///run/user/1000/docker.sock")
+    assert not endpoint_is_rootless("unix:///var/run/docker.sock")
+    host = "1000:100"
+    assert rewrite_docker_args(["run", "--rm", "--user", host, "img"], host) == [
+        "run", "--rm", "--user", "0:0", "img",
+    ]
+    assert rewrite_docker_args(["run", "--rm", "img"], host)[:3] == ["run", "--user", "0:0"]
+    assert rewrite_docker_args(["run", "--user", "www-data", "img"], host) == [
+        "run", "--user", "www-data", "img",
+    ]
+    assert rewrite_docker_args(["build", "-t", "img", "."], host) == ["build", "-t", "img", "."]
 
 
 def test_find_root_walks_up_to_the_checkouts(tmp_path):

@@ -57,6 +57,8 @@ def launch_env(base_text: str, app: App, http_port: int, server_cpus: str) -> di
     values["TARGET_PORT"] = str(http_port + 1)
     if app.name == "elixir":
         values["PORT"] = str(http_port)
+    if app.fixture == "aspnet":
+        values["CAMPFIRE_DB"] = "/rails/storage/db/campfire.sqlite"
     if app.redis_sidecar:
         values["REDIS_URL"] = f"redis://127.0.0.1:{http_port + REDIS_PORT_OFFSET}/0"
     return values
@@ -235,7 +237,10 @@ def _run_one(
     container = _container_name(http_port)
     redis = _redis_name(http_port)
     try:
-        _prepare_runtime(seed, runtime)
+        _prepare_runtime(seed, runtime, app)
+        own_labels = runtime / "labels.json"
+        if own_labels.is_file():
+            labels = json.loads(own_labels.read_text())
         env = launch_env(base_env, app, http_port, server_cpus)
         if app.redis_sidecar:
             _start_redis(redis, server_cpus, http_port + REDIS_PORT_OFFSET)
@@ -249,7 +254,7 @@ def _run_one(
             "--password", str(_label(labels, "passwords.all")),
         ])["cookie"]
         room = int(_label(labels, "rooms.watercooler"))
-        write_room = int(_label(labels, "rooms.hq"))
+        write_room = _write_room(labels)
         before = _label(labels, "messages.busy_060")
         scrape = _loadgen(loadgen, client_cpus, [
             "scrape", "--base", base_url, "--cookie", cookie, "--room", str(room),
@@ -263,7 +268,7 @@ def _run_one(
         if not measurable:
             failed = ", ".join(name for name, body in row["preflight"].items() if body.get("error"))
             raise HarnessError(f"every route failed preflight: {failed}")
-        database = runtime / "db" / "production.sqlite3"
+        database = _runtime_database(runtime)
         before_count = (
             _message_count(database, write_room, app.name, container)
             if "post_message" in measurable else 0
@@ -313,8 +318,14 @@ def _run_one(
     return row
 
 
+def _write_room(labels: dict) -> int:
+    if "rooms.hq" in labels:
+        return int(labels["rooms.hq"])
+    return int(_label(labels, "rooms.watercooler"))
+
+
 def _route_paths(routes: list[str], labels: dict, room: int, before: object, scrape: dict) -> dict[str, str | None]:
-    avatar = _label(labels, "avatar_tokens.jason")
+    avatar = str(_label(labels, "avatar_tokens.jason")) if "avatar" in routes else ""
     catalog = {
         "room_show": f"/rooms/{room}",
         "messages_page": f"/rooms/{room}/messages?before={before}",
@@ -381,7 +392,9 @@ def _preflight_error(
         return "empty body"
     if name in {"room_show", "messages_page", "search"} and not ids:
         return "response has no messages"
-    if name == "sidebar" and ("shared_rooms" not in text or str(room) not in text):
+    if name == "sidebar" and (
+        str(room) not in text or ("shared_rooms" not in text and "data-sidebar-room" not in text)
+    ):
         return "sidebar is missing the seeded room"
     if name == "avatar" and (not content_type.startswith("image/") or size < 100):
         return "response is not an image"
@@ -413,10 +426,13 @@ def _http_get(base: str, path: str, cookie: str, encoding: str) -> tuple[int, by
         connection.close()
 
 
-def _prepare_runtime(seed: Path, runtime: Path) -> None:
+def _prepare_runtime(seed: Path, runtime: Path, app: App) -> None:
     if runtime.exists():
         _remove_tree(runtime)
     runtime.mkdir(parents=True)
+    if app.fixture == "aspnet":
+        _prepare_aspnet(runtime, app)
+        return
     _copy_tree(seed / "db", runtime / "db")
     _copy_tree(seed / "storage", runtime / "files")
     (runtime / "logs").mkdir()
@@ -424,6 +440,40 @@ def _prepare_runtime(seed: Path, runtime: Path) -> None:
     with sqlite3.connect(database) as connection:
         connection.execute("UPDATE push_subscriptions SET endpoint = 'https://127.0.0.1:9/push/' || id")
         connection.execute("UPDATE webhooks SET url = 'http://127.0.0.1:9/hook/' || id")
+
+
+def _prepare_aspnet(runtime: Path, app: App) -> None:
+    """Seed campfire.sqlite with the image. A Rails database is not served."""
+    staging = runtime / "asp-seed"
+    staging.mkdir()
+    _run([
+        "docker", "run", "--rm",
+        "--entrypoint", "dotnet",
+        "-v", f"{staging}:/out",
+        app.image,
+        "Campfire.Web.dll", "seed", "--output", "/out",
+    ])
+    database = staging / "campfire.sqlite"
+    labels = staging / "labels.json"
+    if not database.is_file() or not labels.is_file():
+        raise HarnessError(f"{app.name} seed did not write {database} and {labels}")
+    db_dir = runtime / "db"
+    db_dir.mkdir()
+    for item in list(staging.iterdir()):
+        if item.name == "labels.json":
+            item.replace(runtime / "labels.json")
+        else:
+            item.replace(db_dir / item.name)
+    staging.rmdir()
+    (runtime / "files").mkdir()
+    (runtime / "logs").mkdir()
+
+
+def _runtime_database(runtime: Path) -> Path:
+    asp = runtime / "db" / "campfire.sqlite"
+    if asp.is_file():
+        return asp
+    return runtime / "db" / "production.sqlite3"
 
 
 def _copy_tree(source: Path, destination: Path) -> None:
@@ -500,11 +550,15 @@ def _require_sample(name: str, sample: dict) -> None:
 
 def _message_count(database: Path, room: int, app: str, container: str) -> int:
     query = f"SELECT COUNT(*) AS n FROM messages WHERE room_id={int(room)}"
+    asp_query = f'SELECT COUNT(*) AS n FROM "Messages" WHERE "RoomId"={int(room)}'
     try:
         return _sqlite(database, query)
-    except sqlite3.OperationalError:
-        if app != "laravel":
-            raise
+    except sqlite3.OperationalError as first:
+        try:
+            return _sqlite(database, asp_query)
+        except sqlite3.OperationalError:
+            if app != "laravel":
+                raise first from None
         completed = subprocess.run(
             [
                 "docker", "exec", "--user", "www-data", container, "php", "-r",
